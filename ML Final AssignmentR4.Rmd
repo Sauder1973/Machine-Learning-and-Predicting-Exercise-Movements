@@ -1,0 +1,163 @@
+---
+title: "Machine Learning and Predicting Exercise Movements"
+author: "Wes Sauder"
+date: "Monday, July 17"
+output: html_document
+---
+
+### Synopsis: 
+
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement, a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset). 
+
+
+![Sensor Position and Axis.](/Users/WSauder/Pictures/SensorData.png)
+
+
+Data was accumulated using sensors in various positions -
+
+* Class A: Proper Lift    - according to the specification 
+* Class B: Improprer Lift - elbows to the front
+* Class C: Improprer Lift - lifting the dumbbell only halfway 
+* Class D: Improprer Lift - lowering the dumbbell only halfway
+* Class E: Improprer Lift - hips to the front
+
+**PLEASE NOTE:  Some Code can be viewed in the APPENDIX of this study to streamline the presentation**
+
+````{r,PackagesUsed, echo=TRUE, message = FALSE, comment = FALSE, eval=TRUE, warning = FALSE, tidy = TRUE}
+set.seed(12345)
+rm(list = ls(all = TRUE))   #Clear Global Environment
+library(ggplot2)   #Packages
+library(caret)
+library(dplyr)
+library(randomForest)
+
+setwd("C:/Users/WSauder/Documents/R Work")
+
+trainFileName <- "pml-training.csv"
+testFileName <- "pml-testing.csv"
+
+trainingOrig <- read.csv(trainFileName,na.strings=c("", "NA"))
+testingOrig <- read.csv(testFileName,na.strings=c("", "NA"))
+trainingOrig$classe <- as.factor(trainingOrig$classe)       #Make the classe variable a factor
+````
+
+
+#### **Results of Exploratory Study and Variable Readiness**
+
+The size of the initial study is substantial.  The current dimensions are (Rows, Columns):
+````{r echo=FALSE, message = FALSE, comment = '', eval=TRUE, warning = FALSE, tidy = TRUE}
+dim(trainingOrig)
+````
+Therefore, it is important to clear columns without value when constructing the model.  Starting with removing 'NA' or columns with no data and other columns with inconsistent or unreliable data including: X, user_name and cvtd_timestamp
+
+````{r, RemoveNA_NVA_Cols, echo=TRUE, message = FALSE, comment = '', eval=TRUE, warning = FALSE, tidy = TRUE}
+# Prep TRAINING
+redTrain <- trainingOrig[, colSums(is.na(trainingOrig)) == 0] # Remove unpopulated columns (IE = NA)
+redTrain <- redTrain[,8:60]  # Remove leading columns which are unreliable and/or provide no value to ML
+# Prep TESTING using the same constraints
+redTest <- testingOrig[, colSums(is.na(testingOrig)) == 0] # Remove unpopulated columns (IE = NA)
+redTest <- redTest[,8:60]  # Remove leading columns which are unreliable and/or provide no value to ML
+````
+
+Lastly, 'integer' based columns capturing roll, pitch, yaw and total acceleration are removed as well.
+
+````{r, RollPitchYawTotAccl, echo=TRUE, message = FALSE, comment = '', eval=TRUE, warning = FALSE, tidy = TRUE}
+
+nonNumCols <- which(lapply(redTrain,class) %in% "numeric")       # Training and Validation Data First
+trained <- redTrain[nonNumCols]
+trained$classe = redTrain$classe
+testData <- redTest[nonNumCols] #Remove Columns from Test Data 
+testData <- data.frame(sapply(testData, as.numeric)) # Convert Integer variables to Numeric  #ensure rest of columns are converted to Numeric
+
+````
+
+  
+#### Removing the near zero variables
+Ensure no other variables could be removed using values near zero.  None were found.
+````{r, eval=TRUE, tidy = TRUE}
+nearZeroVariables <- nearZeroVar(trained,saveMetrics=TRUE)
+nearZeroVariables
+```
+
+#### Create cross validation set
+The training set is divided in two parts, one for training and the other for cross validation
+
+````{r, eval=TRUE}
+
+trained$classe = redTrain$classe            # Push Classe Back to the dataset.
+inTrain = createDataPartition(trained$classe, p = .8, list=FALSE)
+training = trained[inTrain,]
+CVdata = trained[-inTrain,]
+````
+After the final column purge, the dimensions of the Original, Training, Validation and Testing sets respectively are (Rows, Columns):
+````{r echo=FALSE, message = FALSE, comment = '', eval=TRUE, warning = FALSE, tidy = TRUE}
+dim(trainingOrig)
+dim(training)
+dim(CVdata)
+dim(testData)
+````
+
+
+
+#### Train model
+Train model with random forest due to its highly accuracy rate. The model is build on a training set of 28 variables from the initial 160. We choose a cross-validation of 4-folds to be used as train control method.  Random Forests is an appropriate model due to the discrete nature of the outputs (A,B,C,D and E)
+````{r, eval=TRUE, cache = TRUE}
+
+RF_model <- train(classe ~., 
+                  method="rf", 
+                  data=training,
+                  prof = TRUE,
+                  trControl=trainControl(method='cv'), 
+                  number=4, 
+                  allowParallel=TRUE )
+````
+
+#### Accuracy on training set and cross validation set
+Following the computation on the accuracy of trainig and cross validation set
+
+Ensure Model is correct by running Test Data against the trained object.
+Training set: 
+````{r, eval=TRUE}
+trainingPred <- predict(RF_model, training[,0:27])
+confusionMatrix(trainingPred, training$classe)
+````
+
+
+#### Cross validation Results
+
+Using the validation data prior to testing, the cross-validation provided an accuracy of 99.85% for the model
+
+````{r, eval=TRUE}
+PredictedCV_Val <- predict(RF_model, CVdata[,0:27])
+confusionMatrix(PredictedCV_Val, CVdata$classe)
+````
+
+
+#### Predicting using TEST Data
+Predictions on the real testing set provided in the exercise
+````{r, eval=TRUE}
+
+TestRF_Output <- predict(RF_model,redTest )
+TestRF_Output
+````
+
+\newpage
+
+### APPENDIX - R Code Used in Study
+
+
+#### **Final Clean Up - File Creation for Grading and Model Caching**
+Save the Results For Grading
+````{r,SaveResults, echo=TRUE, message = TRUE, comment = FALSE, eval=TRUE, warning = FALSE, tidy = TRUE}
+pml_write_files = function(x){
+  n = length(x)
+  for(i in 1:n){
+    filename = paste0("problem_id_",i,".txt")
+    write.table(x[i],file=filename,quote=FALSE,row.names=FALSE,col.names=FALSE)
+  }
+}
+pml_write_files(TestRF_Output)    #Use the Working Directory in in the initial setup.
+
+# saveRDS(RF_model, file="RandomForestsModel.rds")
+
+````
